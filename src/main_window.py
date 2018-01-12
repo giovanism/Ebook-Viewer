@@ -17,7 +17,8 @@ import constants
 import gi
 
 gi.require_version('Gtk', '3.0')
-from gi.repository import Gtk, Gdk, GObject
+gi.require_version('WebKit2', '4.0')
+from gi.repository import Gtk, Gdk, GObject, WebKit2
 from components import header_bar, viewer, chapters_list
 from workers import config_provider as config_provider_module, content_provider as content_provider_module
 import sys
@@ -69,15 +70,17 @@ class MainWindow(Gtk.ApplicationWindow):
         self.left_scrollable_window = Gtk.ScrolledWindow()
         self.left_scrollable_window.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
         # Don't show it after startup ie. don't pack it to self.panned
-        self.is_paned_visible = False;
+        self.is_paned_visible = False
 
         # Adds WebKit viewer component from Viewer component
 
         self.viewer = viewer.Viewer(self)
         print("Displaying blank page.")
         self.viewer.load_uri("about:blank")  # Display a blank page
-        self.viewer.connect("load-finished", self.__ajust_scroll_position)
-        self.viewer.connect("load-finished", self.__save_new_position)
+        
+        self.viewer.connect("load-changed", self.__ajust_scroll_position)
+        self.viewer.connect("load-changed", self.__save_new_position)
+        
         self.right_box.pack_end(self.right_scrollable_window, True, True, 0)
         # Create Chapters List component and pack it on the left
         self.chapters_list_component = chapters_list.ChaptersListComponent(self)
@@ -167,19 +170,19 @@ class MainWindow(Gtk.ApplicationWindow):
         :param widget:
         :param data:
         """
-        if self.scroll_to_set != 0.0:
+        if data == WebKit2.LoadEvent.FINISHED and self.scroll_to_set != 0.0:
             self.right_scrollable_window.get_vadjustment().set_value(self.scroll_to_set)
             if self.right_scrollable_window.get_vadjustment().get_value() != 0.0:
                 self.scroll_to_set = 0.0
 
-    def __save_new_position(self, wiget, data):
+    def __save_new_position(self, widget, data):
         """
         Saves new position in case new load came from link based navigation
         :param wiget:
         :param data:
         """
-        if not data.get_uri() == "about:blank":
-            self.content_provider.set_data_from_uri(data.get_uri())
+        if data == WebKit2.LoadEvent.FINISHED and not self.viewer.get_uri() == "about:blank":
+            self.content_provider.set_data_from_uri(self.viewer.get_uri())
 
     def load_chapter(self, chapter):
         """
@@ -213,12 +216,9 @@ class MainWindow(Gtk.ApplicationWindow):
         Sets GTK theme and Viwer CSS according to application settings
         """
         self.settings = Gtk.Settings.get_default()
-        if self.config_provider.config["Application"]["stylesheet"] == "Day":
-            self.viewer.set_style_day()
-            self.settings.set_property("gtk-application-prefer-dark-theme", False)
-        else:
-            self.viewer.set_style_night()
-            self.settings.set_property("gtk-application-prefer-dark-theme", True)
+        is_night = self.config_provider.config["Application"]["stylesheet"] != "Day"
+        self.viewer.set_style_night(is_night)
+        self.settings.set_property("gtk-application-prefer-dark-theme", is_night)
 
     def __on_copy_activate(self, widget):
         """
@@ -326,12 +326,12 @@ class MainWindow(Gtk.ApplicationWindow):
         else:
             self.__continiue_book_loading(filename)
 
-    def show_menu(self):
+    def show_menu(self, event):
         """
         Displays right click context menu
         """
         if self.content_provider.status:
-            self.menu.popup(None, None, None, None, 0, Gtk.get_current_event_time())
+            self.menu.popup_at_pointer(event)
 
     def toggle_left_paned(self):
         """
